@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>Pastel Tetris with Emotions</title>
+  <style>
+    /* 화면 중앙 정렬 및 배경 */
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #333;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    /* 테트리스 캔버스 */
+    #tetris {
+      background: #000;
+      box-shadow: 0 0 10px rgba(0,0,0,0.5);
+      display: block;
+    }
+  </style>
+</head>
+<body>
+<canvas id="tetris" width="320" height="640"></canvas>
+
+<script>
+/* =====================================
+ * 1) 기본 설정
+ * ===================================== */
+const canvas = document.getElementById('tetris');
+const context = canvas.getContext('2d');
+
+// 블록(칸) 하나의 크기(px)
+const BLOCK_SIZE = 32;
+
+// 보드 크기(행, 열)
+const ROW = 20;
+const COL = 10;
+
+// 보드 2차원 배열 (0: 빈칸)
+let board = [];
+for (let r = 0; r < ROW; r++) {
+  board[r] = [];
+  for (let c = 0; c < COL; c++) {
+    board[r][c] = 0;
+  }
+}
+
+/**
+ * 파스텔 톤 색상 배열 (인덱스 0은 빈 칸)
+ * 필요에 따라 더 예쁜 파스텔 색을 골라보세요.
+ */
+const pastelColors = [
+  '#000000', // 0 => 빈칸은 검정색
+  '#FFC1CC', // 1 => 분홍
+  '#FFD8B1', // 2 => 살구/오렌지
+  '#FFFFC1', // 3 => 옅은 노랑
+  '#D7FFD9', // 4 => 연한 민트
+  '#D9EEFF', // 5 => 연한 하늘
+  '#F3D9FF', // 6 => 연한 보라
+  '#FFE9C7', // 7 => 크림/피치색
+];
+
+/* =====================================
+ * 2) 테트리스 블록 정의
+ * ===================================== */
+const SHAPES = {
+  I: [
+    [[1,1,1,1]],
+    [[1],[1],[1],[1]],
+  ],
+  O: [
+    [[6,6],
+     [6,6]],
+  ],
+  T: [
+    [[0,1,0],
+     [1,1,1]],
+    [[1,0],
+     [1,1],
+     [1,0]],
+    [[1,1,1],
+     [0,1,0]],
+    [[0,1],
+     [1,1],
+     [0,1]],
+  ],
+  S: [
+    [[0,3,3],
+     [3,3,0]],
+    [[3,0],
+     [3,3],
+     [0,3]]
+  ],
+  Z: [
+    [[4,4,0],
+     [0,4,4]],
+    [[0,4],
+     [4,4],
+     [4,0]]
+  ],
+  J: [
+    [[7,0,0],
+     [7,7,7]],
+    [[7,7],
+     [7,0],
+     [7,0]],
+    [[7,7,7],
+     [0,0,7]],
+    [[0,7],
+     [0,7],
+     [7,7]]
+  ],
+  L: [
+    [[0,0,5],
+     [5,5,5]],
+    [[5,0],
+     [5,0],
+     [5,5]],
+    [[5,5,5],
+     [5,0,0]],
+    [[5,5],
+     [0,5],
+     [0,5]]
+  ]
+};
+
+/** 블록 종류(key)별 색상 인덱스 매핑(단순 예시) */
+function getColorIndex(key) {
+  switch(key) {
+    case 'I': return 2;
+    case 'O': return 6;
+    case 'T': return 1;
+    case 'S': return 3;
+    case 'Z': return 4;
+    case 'J': return 7;
+    case 'L': return 5;
+    default:  return 1;
+  }
+}
+
+/**
+ * 3) 블록(피스)마다 감정(표정) 지정
+ * - normal, cry, angry 중 하나를 랜덤 부여
+ */
+const emotions = ['normal', 'cry', 'angry'];
+
+/** 랜덤 테트리스 블록 하나 생성 */
+function randomPiece() {
+  const keys = Object.keys(SHAPES); 
+  const randomKey = keys[Math.floor(Math.random() * keys.length)];
+  const shape = SHAPES[randomKey];
+
+  const randomRotation = Math.floor(Math.random() * shape.length);
+  const randomEmotion = emotions[Math.floor(Math.random() * emotions.length)];
+
+  return {
+    tetromino: shape,
+    rotationIndex: randomRotation,
+    x: 3,       // 보드 내 시작 x 위치
+    y: -2,      // 위에서 시작(화면 밖)
+    colorIndex: getColorIndex(randomKey),
+    emotion: randomEmotion,
+  };
+}
+
+/* 현재 조작 중인 블록 */
+let currentPiece = randomPiece();
+function currentTetromino() {
+  return currentPiece.tetromino[currentPiece.rotationIndex];
+}
+
+/* =====================================
+ * 4) 얼굴(표정) 그리기 도우미
+ * ===================================== */
+
+/** 모서리 둥근 사각형 경로 생성 함수 */
+function drawRoundedRect(x, y, w, h, radius) {
+  context.beginPath();
+  context.moveTo(x + radius, y);
+  context.lineTo(x + w - radius, y);
+  context.quadraticCurveTo(x + w, y, x + w, y + radius);
+  context.lineTo(x + w, y + h - radius);
+  context.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+  context.lineTo(x + radius, y + h);
+  context.quadraticCurveTo(x, y + h, x, y + h - radius);
+  context.lineTo(x, y + radius);
+  context.quadraticCurveTo(x, y, x + radius, y);
+  context.closePath();
+}
+
+/** 
+ * 표정(emotion)에 따라 눈/입 모양을 그리는 함수 
+ * px, py: 사각형 왼상단 좌표
+ * w, h : 사각형 폭/높이
+ */
+function drawFace(px, py, w, h, emotion) {
+  // 눈 좌표/크기
+  const eyeRadius = 2;
+  const leftEyeX = px + w * 0.3;
+  const rightEyeX= px + w * 0.7;
+  const eyeY      = py + h * 0.35;
+
+  // 공통: 눈 색
+  context.fillStyle = '#000';
+
+  if (emotion === 'normal') {
+    // 1) 기본 표정
+    // - 동그란 두 눈
+    context.beginPath();
+    context.arc(leftEyeX, eyeY, eyeRadius, 0, Math.PI * 2);
+    context.fill();
+    context.beginPath();
+    context.arc(rightEyeX, eyeY, eyeRadius, 0, Math.PI * 2);
+    context.fill();
+
+    // - 입: 가벼운 미소 (반원)
+    context.beginPath();
+    context.arc(px + w/2, py + h*0.65, w*0.18, 0, Math.PI, false);
+    context.lineWidth = 2;
+    context.strokeStyle = '#000';
+    context.stroke();
+
+  } else if (emotion === 'cry') {
+    // 2) 우는 표정
+    // - 눈: 동그란 눈 + 눈물 (파란 방울)
+    context.beginPath();
+    context.arc(leftEyeX, eyeY, eyeRadius, 0, Math.PI * 2);
+    context.fill();
+    context.beginPath();
+    context.arc(rightEyeX, eyeY, eyeRadius, 0, Math.PI * 2);
+    context.fill();
+
+    // 눈물 (왼쪽 눈 아래쪽에 파란물방울)
+    context.beginPath();
+    context.fillStyle = '#42A5F5'; // 눈물 색
+    context.arc(leftEyeX, eyeY+6, eyeRadius*1.2, 0, Math.PI * 2);
+    context.fill();
+
+    // 입: 아래로 굽은 모양(역방향 반원)
+    context.beginPath();
+    context.arc(px + w/2, py + h*0.8, w*0.18, Math.PI, 0, false);
+    // 반시계 방향이라 (시작각=Math.PI, 끝각=0)
+    context.lineWidth = 2;
+    context.strokeStyle = '#000';
+    context.stroke();
+
+  } else if (emotion === 'angry') {
+    // 3) 화난 표정
+    // - 눈: 찌푸린 눈썹
+    //   : 눈 대신 가로 선(또는 사선)으로 표현
+    // 왼쪽 눈썹
+    context.strokeStyle = '#000';
+    context.lineWidth = 2;
+    context.beginPath();
+    // 살짝 올라간 사선
+    context.moveTo(leftEyeX - 3, eyeY - 2);
+    context.lineTo(leftEyeX + 3, eyeY + 2);
+    context.stroke();
+    // 오른쪽 눈썹
+    context.beginPath();
+    context.moveTo(rightEyeX - 3, eyeY + 2);
+    context.lineTo(rightEyeX + 3, eyeY - 2);
+    context.stroke();
+
+    // 입: 삐뚤어진 찡그린 입
+    context.beginPath();
+    context.moveTo(px + w*0.3, py + h*0.7);
+    context.lineTo(px + w*0.7, py + h*0.75);
+    context.stroke();
+  }
+}
+
+/** 
+ * 칸(블록) 그리기 
+ * colorIdx===0이면 빈칸이고, 아니면 둥근 사각+표정 그리기 
+ */
+function drawSquare(x, y, colorIdx, emotion) {
+  const px = x * BLOCK_SIZE;
+  const py = y * BLOCK_SIZE;
+  const w  = BLOCK_SIZE;
+  const h  = BLOCK_SIZE;
+
+  if (colorIdx === 0) {
+    // 빈 칸은 검정색으로
+    context.fillStyle = '#000';
+    context.fillRect(px, py, w, h);
+    return;
+  }
+
+  // 1) 둥근 사각형(얼굴의 배경 색)
+  context.fillStyle = pastelColors[colorIdx];
+  drawRoundedRect(px, py, w, h, 6); // 모서리 둥글기 6
+  context.fill();
+
+  // 2) 테두리(Optional)
+  context.strokeStyle = '#555';
+  context.lineWidth = 1.5;
+  context.stroke();
+
+  // 3) 표정 그리기
+  drawFace(px, py, w, h, emotion);
+}
+
+/* =====================================
+ * 5) 보드/블록 그리기
+ * ===================================== */
+/** 전체 보드 + 현재 블록 */
+function drawBoard() {
+  for (let r = 0; r < ROW; r++) {
+    for (let c = 0; c < COL; c++) {
+      // 고정된 블록에는 '표정' 정보를 따로 저장해두지 않았으므로
+      // 여기서는 emotion 파라미터에 기본값 'normal'만 줍니다
+      // → 실제 게임에서는 각 칸마다 emotion을 저장하려면 별도 구조가 필요합니다
+      //   (단순 예시에선 고정된 칸은 전부 'normal'로 표시)
+      drawSquare(c, r, board[r][c], 'normal');
+    }
+  }
+  // 떨어지는 현재 블록
+  drawPiece(currentPiece);
+}
+
+/** 현재 블록 그리기 */
+function drawPiece(piece) {
+  const shape = piece.tetromino[piece.rotationIndex];
+  for (let r = 0; r < shape.length; r++) {
+    for (let c = 0; c < shape[r].length; c++) {
+      if (shape[r][c] !== 0) {
+        const drawX = piece.x + c;
+        const drawY = piece.y + r;
+        if (drawY >= 0) {
+          // 현재 조작 중인 블록만은 piece.emotion 사용
+          drawSquare(drawX, drawY, piece.colorIndex, piece.emotion);
+        }
+      }
+    }
+  }
+}
+
+/* =====================================
+ * 6) 충돌 검사
+ * ===================================== */
+function collision(nextX, nextY, nextRot) {
+  const shape = currentPiece.tetromino[nextRot];
+  for (let r = 0; r < shape.length; r++) {
+    for (let c = 0; c < shape[r].length; c++) {
+      if (shape[r][c] === 0) continue;
+
+      const boardX = nextX + c;
+      const boardY = nextY + r;
+
+      // 보드 밖(좌/우/아래)에 닿는지
+      if (boardX < 0 || boardX >= COL || boardY >= ROW) {
+        return true;
+      }
+      // 아직 위(-1, -2)는 무시
+      if (boardY < 0) continue;
+      // 이미 블록이 있는 경우
+      if (board[boardY][boardX] !== 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/* =====================================
+ * 7) 블록 고정 & 줄 제거
+ * ===================================== */
+function lockPiece() {
+  const shape = currentTetromino();
+  for (let r = 0; r < shape.length; r++) {
+    for (let c = 0; c < shape[r].length; c++) {
+      if (shape[r][c] !== 0) {
+        const boardX = currentPiece.x + c;
+        const boardY = currentPiece.y + r;
+        // 화면 위쪽(-1)에 도달한 상태 -> 게임 오버
+        if (boardY < 0) {
+          alert("게임 오버!");
+          resetGame();
+          return;
+        }
+        // 보드에 색상 인덱스 고정(표정은 저장 안 함)
+        board[boardY][boardX] = currentPiece.colorIndex;
+      }
+    }
+  }
+  // 줄 정리
+  clearLines();
+  // 새 블록
+  currentPiece = randomPiece();
+}
+
+function clearLines() {
+  for (let r = 0; r < ROW; r++) {
+    let isFull = true;
+    for (let c = 0; c < COL; c++) {
+      if (board[r][c] === 0) {
+        isFull = false;
+        break;
+      }
+    }
+    if (isFull) {
+      // r번 줄 제거 후 위에서 아래로 당김
+      for (let y = r; y > 0; y--) {
+        for (let c = 0; c < COL; c++) {
+          board[y][c] = board[y-1][c];
+        }
+      }
+      // 맨 위는 빈칸
+      for (let c = 0; c < COL; c++) {
+        board[0][c] = 0;
+      }
+    }
+  }
+}
+
+/* =====================================
+ * 8) 키보드 조작
+ * ===================================== */
+document.addEventListener('keydown', (e) => {
+  switch(e.key) {
+    case 'ArrowLeft':
+      if (!collision(currentPiece.x - 1, currentPiece.y, currentPiece.rotationIndex)) {
+        currentPiece.x--;
+        drawBoard();
+      }
+      break;
+    case 'ArrowRight':
+      if (!collision(currentPiece.x + 1, currentPiece.y, currentPiece.rotationIndex)) {
+        currentPiece.x++;
+        drawBoard();
+      }
+      break;
+    case 'ArrowDown':
+      if (!collision(currentPiece.x, currentPiece.y + 1, currentPiece.rotationIndex)) {
+        currentPiece.y++;
+        drawBoard();
+      } else {
+        lockPiece();
+        drawBoard();
+      }
+      break;
+    case 'ArrowUp': {
+      // 회전
+      const nextRot = (currentPiece.rotationIndex + 1) % currentPiece.tetromino.length;
+      if (!collision(currentPiece.x, currentPiece.y, nextRot)) {
+        currentPiece.rotationIndex = nextRot;
+        drawBoard();
+      }
+      break;
+    }
+  }
+});
+
+/* =====================================
+ * 9) 게임 리셋
+ * ===================================== */
+function resetGame() {
+  // 보드 초기화
+  for (let r = 0; r < ROW; r++) {
+    for (let c = 0; c < COL; c++) {
+      board[r][c] = 0;
+    }
+  }
+  currentPiece = randomPiece();
+  drawBoard();
+}
+
+/* =====================================
+ * 10) 자동 하강
+ * ===================================== */
+let lastDropTime = Date.now();
+
+function drop() {
+  const now = Date.now();
+  const delta = now - lastDropTime;
+  // 1초 간격으로 자동 하강
+  if (delta > 1000) {
+    if (!collision(currentPiece.x, currentPiece.y + 1, currentPiece.rotationIndex)) {
+      currentPiece.y++;
+    } else {
+      lockPiece();
+    }
+    lastDropTime = now;
+  }
+  drawBoard();
+  requestAnimationFrame(drop);
+}
+
+// 초기화 후 게임 시작
+resetGame();
+drop();
+</script>
+</body>
+</html>
